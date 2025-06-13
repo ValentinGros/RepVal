@@ -17,24 +17,10 @@ camera.angularSpeed = 0.05;
 camera.angle = Math.PI / 2;
 camera.direction = new BABYLON.Vector3(Math.cos(camera.angle), 0, Math.sin(camera.angle));
 
-// Global click handler for sprite selection
 scene.onPointerObservable.add((pointerInfo) => {
   switch (pointerInfo.type) {
     case BABYLON.PointerEventTypes.POINTERPICK:
-      if (pointerInfo.pickInfo && pointerInfo.pickInfo.pickedSprite) {
-        // Select the picked sprite (particle)
-        const pickedName = pointerInfo.pickInfo.pickedSprite.name;
-        console.log('Sprite clicked:', pickedName);
-        
-        // Update search input if it exists
-        const searchInput = document.getElementById('searchInput');
-        if (searchInput) {
-          searchInput.value = pickedName;
-        }
-        
-        // Move camera to the clicked sprite
-        moveCameraToSprite(pickedName);
-      }
+      searchButton.click();
       break;
 	 }
 });
@@ -54,8 +40,12 @@ let blinkCount = 0;
 let frameCounter = 0;
 const frameThreshold = 20; // Ajustez ce nombre pour changer la fréquence
 
-// Visual effects variables
-let starField = null;
+// Variables pour le mode démo
+let demoModeActive = false;
+let demoInterval = null;
+let currentDemoGroupIndex = 0;
+let demoGroups = [];
+const demoPauseDuration = 3000; // 3 secondes de pause à chaque groupe
 
 //var font = "Calibri 20px monospace";
 
@@ -64,275 +54,82 @@ const scatter = new BABYLON.PointsCloudSystem("scatter", 0, scene);
 const labelSprites = [];
 const originalPositions = [];
 
-// Create background starfield
-function createStarField() {
-    const starCount = 1000;
-    const starSystem = new BABYLON.PointsCloudSystem("starField", starCount, scene);
-    
-    starSystem.addPoints(starCount, function(particle) {
-        // Random position in a large sphere around the scene
-        const radius = 500;
-        const theta = Math.random() * Math.PI * 2;
-        const phi = Math.random() * Math.PI;
-        
-        particle.position = new BABYLON.Vector3(
-            radius * Math.sin(phi) * Math.cos(theta),
-            radius * Math.sin(phi) * Math.sin(theta),
-            radius * Math.cos(phi)
-        );
-        
-        // Random color between white and light blue
-        const intensity = 0.3 + Math.random() * 0.7;
-        particle.color = new BABYLON.Color4(intensity, intensity, intensity + 0.2, 1);
-    });
-    
-    starSystem.buildMeshAsync().then(mesh => {
-        mesh.material = new BABYLON.StandardMaterial('starMaterial', scene);
-        mesh.material.pointSize = 2;
-        mesh.material.usePointSizing = true;
-        mesh.material.disableLighting = true;
-        mesh.material.emissiveColor = new BABYLON.Color3(0.8, 0.8, 1);
-        starField = mesh;
-    });
-}
-
-
-// Global function to get all sprites from all managers
-function getAllSprites() {
-    const allSprites = [];
-    if (scene && scene.spriteManagers) {
-        scene.spriteManagers.forEach(manager => {
-            if (manager.sprites) {
-                allSprites.push(...manager.sprites);
-            }
-        });
-    }
-    return allSprites;
-}
-
 // Create scatter mesh and label sprites
 //const imageUrl = 'bubble12.png';
 //const imageSize = 5000;
 
-// Default values - will be overridden by individual sprite images
-const defaultImageSize = 640;
-const spriteRatio = 2;
+const imageUrl = 'etoile2.png';
+const imageSize = 640;
+const spriteRatio = 1;
+
+
+function main(currentData, ratio) {
+
+
+const data = currentData.map(d => {
+    d.x = d.x * ratio;
+    d.y = d.y * ratio;
+    d.z = d.z * ratio;
+    d.color = getColor(d.subType);
+    d.metadata = { subType: d.subType };
+    return d;
+});
+
+
+const labelSpriteManager = new BABYLON.SpriteManager('labelSpriteManager', imageUrl, data.length, imageSize, scene);
+labelSpriteManager.isPickable = true;
 
 
 
-// Function to ensure minimum distance between sprites
-async function adjustPositionsForMinimumDistance(data, minDistance = 8) {
-    // Skip adjustment for large datasets to prevent freezes
-    if (data.length > 1000) {
-        console.log("Skipping position adjustment for large dataset to prevent freeze");
-        return data;
-    }
-    
-    const adjustedData = [...data];
-    const maxIterations = Math.min(20, Math.floor(data.length / 10)); // Adaptive max iterations
-    let iteration = 0;
-    let progressThreshold = 0.05; // Increased threshold for faster exit
-    let lastCollisionCount = Infinity;
-    
-    while (iteration < maxIterations) {
-        let hasCollisions = false;
-        let collisionCount = 0;
-        
-        // Process in smaller batches with yield to prevent UI freezing
-        const batchSize = Math.min(25, adjustedData.length); // Smaller batch size
-        
-        for (let batch = 0; batch < adjustedData.length; batch += batchSize) {
-            const endBatch = Math.min(batch + batchSize, adjustedData.length);
-            
-            // Yield control to prevent UI freeze
-            if (batch > 0 && batch % 100 === 0) {
-                await new Promise(resolve => setTimeout(resolve, 1));
-            }
-            
-            for (let i = batch; i < endBatch; i++) {
-                // Limit inner loop for performance
-                const maxJ = Math.min(i + 50, adjustedData.length);
-                for (let j = i + 1; j < maxJ; j++) {
-                    const sprite1 = adjustedData[i];
-                    const sprite2 = adjustedData[j];
-                    
-                    const dx = sprite1.x - sprite2.x;
-                    const dy = sprite1.y - sprite2.y;
-                    const dz = sprite1.z - sprite2.z;
-                    const distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
-                    
-                    if (distance < minDistance && distance > 0.001) {
-                        hasCollisions = true;
-                        collisionCount++;
-                        
-                        // Simplified movement calculation
-                        const length = distance || 0.001;
-                        const overlap = minDistance - distance;
-                        const moveDistance = Math.min(overlap * 0.2, 1); // Reduced movement
-                        
-                        const factor = moveDistance / length;
-                        sprite1.x += dx * factor;
-                        sprite1.y += dy * factor;
-                        sprite1.z += dz * factor;
-                        
-                        sprite2.x -= dx * factor;
-                        sprite2.y -= dy * factor;
-                        sprite2.z -= dz * factor;
-                    }
-                }
-            }
-        }
-        
-        // Early exit conditions
-        const progress = (lastCollisionCount - collisionCount) / Math.max(lastCollisionCount, 1);
-        if (!hasCollisions || (iteration > 5 && progress < progressThreshold)) {
-            break;
-        }
-        
-        lastCollisionCount = collisionCount;
-        iteration++;
-    }
-    
-    console.log(`Position adjustment completed after ${iteration} iterations (${lastCollisionCount} remaining collisions)`);
-    return adjustedData;
-}
+scatter.addPoints(data.length, function(particle) {
+    const point = data[particle.idx];
+    particle.position = new BABYLON.Vector3(point.x, point.y, point.z);
+    originalPositions.push(particle.position.clone());
+	
+    let sprite = new BABYLON.Sprite(point.prefLabel, labelSpriteManager);
+	sprite.isPickable = true;
+    sprite.position = particle.position;
+	sprite.originalPosition = originalPositions[particle.idx];
+    sprite.size = spriteRatio;
+    sprite.color = new BABYLON.Color4(point.color.r, point.color.g, point.color.b, 1);
+	sprite.metadata = { subType: point.subType };
+    sprite.isVisible = true; // Ensure the sprite is initially visible
 
-async function main(currentData, ratio) {
-    // Charger la configuration des images personnalisées
-    const imageConfiguration = loadImageConfiguration();
-    
-    // Prepare data with scaled positions and color
-    let data = currentData.map(d => ({
-        ...d,
-        x: d.x * ratio,
-        y: d.y * ratio,
-        z: d.z * ratio,
-        color: getColor(d.subType),
-        metadata: { subType: d.subType },
-        // Utiliser l'image personnalisée si disponible, sinon utiliser l'image par défaut
-        imageFile: imageConfiguration[d.level] || d.imageFile || getDefaultImageForLevel(d.level)
-    }));
-    
-    // Adjust positions to ensure minimum distance of 8 between sprites
-    data = await adjustPositionsForMinimumDistance(data, 8);
+// Add an ActionManager to the sphere
+sprite.actionManager = new BABYLON.ActionManager(scene);
 
-    // Group data by level to create separate sprite managers for each PNG
-    const dataByLevel = {};
-    data.forEach(d => {
-        const level = d.level || 5; // Default to level 5 if no level specified
-        const imageFile = d.imageFile; // Image déjà déterminée ci-dessus
-        if (!dataByLevel[level]) {
-            dataByLevel[level] = {
-                imageFile: imageFile,
-                elements: []
+// Register actions for mouse over and mouse out
+sprite.actionManager.registerAction(new BABYLON.ExecuteCodeAction(
+    BABYLON.ActionManager.OnPointerOverTrigger,
+    function (evt) {
+		const spriteName = evt.source.name;
+		const sprites = scene.spriteManagers[0].sprites; // Assuming the first sprite manager
+		
+		let targetSprite = sprites.find(s => s.name === spriteName);
+
+        // Find the nearest particles
+        let distances = sprites.filter(s => s.isVisible).map(sprite => {
+            return {
+                name: sprite.name,
+                distance: BABYLON.Vector3.Distance(targetSprite.originalPosition, sprite.originalPosition)
             };
-        }
-        dataByLevel[level].elements.push(d);
-    });
-
-    // Create sprite managers for each level
-    const spriteManagers = {};
-    Object.keys(dataByLevel).forEach(level => {
-        const levelData = dataByLevel[level];
-        const spriteManager = new BABYLON.SpriteManager(
-            `labelSpriteManager_level_${level}`,
-            levelData.imageFile,
-            levelData.elements.length,
-            defaultImageSize,
-            scene
-        );
-        spriteManager.isPickable = true;
-        spriteManagers[level] = spriteManager;
-    });
-
-
-
-    // Helper function to create a sprite and attach actions
-    function createLabelSprite(point, idx, spriteManager) {
-        const position = new BABYLON.Vector3(point.x, point.y, point.z);
-        originalPositions.push(position.clone());
-
-        // Calculate size based on level: level 1 = 6, level 2 = 5.5, level 3 = 5, etc.
-        const level = point.level || 5;
-        const spriteSize = level === 1 ? 12 : Math.max(1, 6.5 - (level * 0.5)); // Level 1 = 12, others use original formula
-
-        const sprite = new BABYLON.Sprite(point.prefLabel, spriteManager);
-        Object.assign(sprite, {
-            isPickable: true,
-            position,
-            originalPosition: originalPositions[idx],
-            size: spriteSize,
-            color: new BABYLON.Color4(point.color.r, point.color.g, point.color.b, 1),
-            metadata: { subType: point.subType, level: point.level },
-            isVisible: true
         });
-
-        sprite.actionManager = new BABYLON.ActionManager(scene);
-
-        // Mouse over: update nearest list and search input
-        sprite.actionManager.registerAction(new BABYLON.ExecuteCodeAction(
-            BABYLON.ActionManager.OnPointerOverTrigger,
-            evt => {
-                const spriteName = evt.source.name;
-                const allSprites = getAllSprites();
-                const targetSprite = allSprites.find(s => s.name === spriteName);
-                if (targetSprite) {
-                    const distances = allSprites.filter(s => s.isVisible).map(s => ({
-                        name: s.name,
-                        distance: BABYLON.Vector3.Distance(targetSprite.originalPosition, s.originalPosition)
-                    })).sort((a, b) => a.distance - b.distance);
-                    updateNearestList(distances, spriteName, targetSprite.metadata.subType);
-                    
-                    const searchInput = document.getElementById('searchInput');
-                    if (searchInput) {
-                        searchInput.value = spriteName;
-                    }
-                }
-            }
-        ));
-
-        // Click: move camera to sprite (OnPickTrigger for better click detection)
-        sprite.actionManager.registerAction(new BABYLON.ExecuteCodeAction(
-            BABYLON.ActionManager.OnPickTrigger,
-            evt => {
-                const spriteName = evt.source.name;
-                console.log('Sprite clicked via ActionManager:', spriteName);
-                
-                const searchInput = document.getElementById('searchInput');
-                if (searchInput) {
-                    searchInput.value = spriteName;
-                }
-                moveCameraToSprite(spriteName);
-            }
-        ));
-
-        // Alternative click handler for better compatibility
-        sprite.actionManager.registerAction(new BABYLON.ExecuteCodeAction(
-            BABYLON.ActionManager.OnPickUpTrigger,
-            evt => {
-                const spriteName = evt.source.name;
-                console.log('Sprite clicked via OnPickUpTrigger:', spriteName);
-                
-                const searchInput = document.getElementById('searchInput');
-                if (searchInput) {
-                    searchInput.value = spriteName;
-                }
-                moveCameraToSprite(spriteName);
-            }
-        ));
-
-        labelSprites.push(sprite);
+        distances.sort((a, b) => a.distance - b.distance);
+		
+		updateNearestList(distances, spriteName, targetSprite.metadata.subType)
+		
+		searchInput.value = spriteName
     }
+));
 
 
-    scatter.addPoints(data.length, function(particle) {
-        const point = data[particle.idx];
-        const level = point.level || 5; // Default to level 5 if no level specified
-        const spriteManager = spriteManagers[level];
-        
-        particle.position = new BABYLON.Vector3(point.x, point.y, point.z);
-        createLabelSprite(point, particle.idx, spriteManager);
-    });
+sprite.actionManager.registerAction(new BABYLON.ExecuteCodeAction(BABYLON.ActionManager.OnPickUpTrigger, function (evt) {
+		searchInput.value = evt.source.name
+		moveCameraToSprite(evt.source.name);
+	}));
+
+    labelSprites.push(sprite);
+});
 
 	
 scene.onBeforeRenderObservable.add(() => {
@@ -349,7 +146,7 @@ scene.onBeforeRenderObservable.add(() => {
 		const fov = camera.fov; // Champs de vision de la caméra
 		const cameraPosition = camera.position;
 	
-    getAllSprites().map(s => {
+    scene.spriteManagers[0].sprites.map(s => {
         var width = engine.getRenderWidth();
         var height = engine.getRenderHeight();
         var identityMatrix = BABYLON.Matrix.Identity();
@@ -368,27 +165,20 @@ scene.onBeforeRenderObservable.add(() => {
         const distance = BABYLON.Vector3.Distance(camera.position, s.position);
 		
         if (distance > 2 && distance < 12 && angle < fov && s.isVisible) {
-            // Get sprite level for size calculation
-            const spriteLevel = s.metadata && s.metadata.level ? s.metadata.level : 5;
-            const spriteSize = spriteLevel === 1 ? 12 : Math.max(1, 6.5 - (spriteLevel * 0.5));
-            
             names.push({
                 "name": s.name + '_layer',
-                "meshName": s.name + '_whoz_mesh',
-                "matName": s.name + '_whoz_mat',
+                "meshName": s.name + '_mesh',
+                "matName": s.name + '_mat',
                 "textureName": s.name,
-    "color": s.color,
-                "position": s.position,
-                "level": spriteLevel,
-                "spriteSize": spriteSize
+				"color": s.color,
+                "position": s.position
             });
         }
     });
 
     // Dispose of unused meshes
-    scene.meshes
-        .filter(mesh => mesh.name.endsWith('_whoz_mesh') && !names.some(n => n.meshName === mesh.name))
-        .forEach(mesh => {
+    scene.meshes.filter(mesh => mesh.name !== 'BACKGROUND').forEach(mesh => {
+        if (!names.some(n => n.meshName === mesh.name)) {
             if (mesh.material) {
                 if (mesh.material.emissiveTexture) {
                     mesh.material.emissiveTexture.dispose(); // Dispose the emissive texture
@@ -397,80 +187,50 @@ scene.onBeforeRenderObservable.add(() => {
             }
             scene.removeMesh(mesh);
             mesh.dispose(); // Dispose the mesh
-        });
+        }
+    });
 
     // Dispose of unused materials
-    scene.materials
-        .filter(material => material.name.endsWith('_whoz_mat') && !names.some(n => n.matName === material.name))
-        .forEach(material => {
+    scene.materials.filter(material => material.name !== 'BACKGROUND').forEach(material => {
+        if (!names.some(n => n.matName === material.name)) {
             if (material.emissiveTexture) {
                 material.emissiveTexture.dispose(); // Dispose the emissive texture
             }
             scene.removeMaterial(material);
             material.dispose(); // Dispose the material
-        });
+        }
+    });
 
     names.forEach(n => {
         if (!scene.meshes.some(l => l.name === n.meshName)) {
-            const font_size = 12;
-            // Scale the parentheses radius based on sprite size (tripled)
-            const baseRadius = 90; // Tripled from 30 to 90
-            const scaledRadius = baseRadius * (n.spriteSize / 4); // Scale relative to default size 4
-            
+            const font_size = 12
             const planeTexture = new BABYLON.DynamicTexture("dynamic texture", font_size*100, scene, true, BABYLON.DynamicTexture.TRILINEAR_SAMPLINGMODE);
-   
-   var textureContext = planeTexture.getContext();
-   
-   //Draw on canvas - scaled parentheses with cyan color and black border
-   // Draw black border first (thicker)
-   textureContext.lineWidth = 3; // Thicker for border effect
-   textureContext.strokeStyle = "black";
-   textureContext.beginPath();
-   textureContext.arc(font_size*50, font_size*50, scaledRadius, -Math.PI/5, Math.PI/5);
-   textureContext.stroke();
-   
-   textureContext.beginPath();
-   textureContext.arc(font_size*50, font_size*50, scaledRadius, -Math.PI/5 + Math.PI, Math.PI/5 + Math.PI);
-   textureContext.stroke();
-   
-   // Draw white parentheses on top
-   textureContext.lineWidth = 2; // Original thickness for white
-   textureContext.strokeStyle = "white";
-   textureContext.beginPath();
-   textureContext.arc(font_size*50, font_size*50, scaledRadius, -Math.PI/5, Math.PI/5);
-   textureContext.stroke();
-   
-   textureContext.beginPath();
-   textureContext.arc(font_size*50, font_size*50, scaledRadius, -Math.PI/5 + Math.PI, Math.PI/5 + Math.PI);
-   textureContext.stroke();
-   
-   planeTexture.update();
-   
-   
-            // Draw text with stroke (border) first, then fill
-            const textY = font_size * 53; // Center the sprite name
-            const fontSize = font_size;
-            const fontFamily = "FreeMono, monospace";
-            const textToDisplay = n.textureName.toUpperCase(); // Convert to uppercase
-            
-            // Set font for measurements
-            textureContext.font = fontSize + "px " + fontFamily;
-            
-            // Draw sprite name with black stroke (border) first
-            textureContext.strokeStyle = "black";
-            textureContext.lineWidth = 1;
-            textureContext.strokeText(textToDisplay, null, textY);
-            
-            // Draw white fill text on top for sprite name
-            planeTexture.drawText(textToDisplay, null, textY, fontSize + "px " + fontFamily, "white", "transparent", true, true);
-            var material = new BABYLON.StandardMaterial(n.textureName + '_whoz_mat', scene);
+			
+			var textureContext = planeTexture.getContext();
+			
+			//Draw on canvas
+			textureContext.lineWidth = 2;
+			textureContext.beginPath();
+			textureContext.arc(font_size*50, font_size*50, 30, -Math.PI/5, Math.PI/5);
+			textureContext.strokeStyle = "rgba("+255*n.color.r+", "+255*n.color.g+", "+255*n.color.b+", 0.7)";
+			textureContext.stroke();
+			
+			textureContext.beginPath();
+			textureContext.arc(font_size*50, font_size*50, 30, -Math.PI/5 + Math.PI, Math.PI/5 + Math.PI);
+			textureContext.stroke();
+			
+			planeTexture.update();
+			
+			
+            planeTexture.drawText(n.textureName, null, (font_size*53), "" + font_size + "px system-ui", "white", "transparent", true, true);
+            var material = new BABYLON.StandardMaterial(n.textureName + '_mat', scene);
             material.emissiveTexture = planeTexture;
             material.opacityTexture = planeTexture;
             material.backFaceCulling = true;
             material.disableLighting = true;
             material.freeze();
 
-   var outputplane = BABYLON.Mesh.CreatePlane(n.textureName + '_whoz_mesh', font_size, scene, false);
+			var outputplane = BABYLON.Mesh.CreatePlane(n.textureName + '_mesh', font_size, scene, false);
             outputplane.billboardMode = BABYLON.AbstractMesh.BILLBOARDMODE_ALL;
             outputplane.isVisible = true;
             outputplane.position = n.position;
@@ -558,6 +318,14 @@ document.addEventListener("DOMContentLoaded", function() {
         });
     }
 
+    // Event listener pour le bouton mode démo
+    const demoModeButton = document.getElementById('demoModeButton');
+    if (demoModeButton) {
+        demoModeButton.addEventListener('click', function() {
+            toggleDemoMode();
+        });
+    }
+
 });
 
 loadFileButton.addEventListener('click', async () => {
@@ -569,7 +337,7 @@ loadFileButton.addEventListener('click', async () => {
             const reader = new FileReader();
             reader.onload = async function(event) {
                 const newdata = JSON.parse(event.target.result);
-                await main(newdata, 20);
+                main(newdata, 20);
                 document.getElementById('fileInputContainer').style.display = 'none';
             };
             reader.readAsText(file);
@@ -579,9 +347,15 @@ loadFileButton.addEventListener('click', async () => {
         }
     } else {
         try {
-            const response = await fetch('./test_data_with_levels.json');
-            const data = await response.json();
-            await main(data, 20);
+			
+			const response = await fetch('./encrypted_PSO_0.json');
+            const encryptedData = await response.text();
+            const password = await showPasswordModal();
+            const data = decryptData(encryptedData, password);
+			
+            //const response = await fetch('./PSO_0.json');
+            //const data = await response.json();
+            main(data, 1);
             document.getElementById('fileInputContainer').style.display = 'none';
         } catch (error) {
             console.error("Failed to load JSON:", error);
@@ -826,7 +600,7 @@ cluster_30: {
     return colors[type] || colors.DEFAULT;
 }
 
-// Update sprite positions to add small movements and orbital mechanics
+// Update sprite positions to add small movements
 function updateSpritePositions() {
     time += 0.004;
 	
@@ -843,48 +617,9 @@ function updateSpritePositions() {
 			const angle = Math.acos(BABYLON.Vector3.Dot(cameraDirection, spriteDirection));
 			if( angle < fov) {
 				const originalPosition = originalPositions[idx];
-				const spriteLevel = sprite.metadata && sprite.metadata.level ? sprite.metadata.level : 5;
-				
-				// Find nearby higher level sprites to orbit around
-				let orbitCenter = null;
-				let bestLevel = Infinity; // Track the highest level (lowest number)
-				let minDistance = Infinity;
-				
-				labelSprites.forEach((otherSprite, otherIdx) => {
-					if (otherSprite !== sprite && otherSprite.metadata && otherSprite.metadata.level) {
-						const otherLevel = otherSprite.metadata.level;
-						// Only orbit around sprites with higher level (lower number = higher level)
-						if (otherLevel < spriteLevel) {
-							const distanceToOther = BABYLON.Vector3.Distance(originalPosition, originalPositions[otherIdx]);
-							// Only consider sprites within orbital range (adjust this value as needed)
-							if (distanceToOther < 15) {
-								// Prioritize higher level (lower number) first, then closer distance
-								if (otherLevel < bestLevel || (otherLevel === bestLevel && distanceToOther < minDistance)) {
-									bestLevel = otherLevel;
-									minDistance = distanceToOther;
-									orbitCenter = originalPositions[otherIdx];
-								}
-							}
-						}
-					}
-				});
-				
-				if (orbitCenter) {
-					// Orbital motion around higher level sprite
-					const orbitRadius = spriteLevel === 1 ? Math.min(minDistance * 5.6, 64) : Math.min(minDistance * 0.7, 8); // Level 1 has octuple orbit radius
-					const orbitSpeed = 0.5 + (13 - spriteLevel) * 0.1; // Lower levels orbit faster
-					const orbitAngle = time * orbitSpeed + idx * 0.5; // Offset each sprite's orbit
-					
-					sprite.position.x = orbitCenter.x + orbitRadius * Math.cos(orbitAngle);
-					sprite.position.y = orbitCenter.y + orbitRadius * Math.sin(orbitAngle) * 0.5; // Flatten Y orbit
-					sprite.position.z = orbitCenter.z + orbitRadius * Math.sin(orbitAngle);
-				} else {
-					// Default floating motion for sprites without orbital targets
-					sprite.position.x = originalPosition.x + 0.8 * Math.sin(time + idx);
-					sprite.position.y = originalPosition.y + 0.8 * Math.cos(time + idx);
-					sprite.position.z = originalPosition.z + 0.8 * Math.sin(time + idx);
-				}
-				
+				sprite.position.x = originalPosition.x + 0.8 * Math.sin(time + idx);
+				sprite.position.y = originalPosition.y + 0.8 * Math.cos(time + idx);
+				sprite.position.z = originalPosition.z + 0.8 * Math.sin(time + idx);
 				sprite.angle = 0.01*idx;
 			}
 		}
@@ -897,11 +632,6 @@ function renderLoop() {
 }
 
 function blinkSprite(sprite) {
-    // Clear any existing blink interval to prevent memory leaks
-    if (sprite.blinkInterval) {
-        clearInterval(sprite.blinkInterval);
-    }
-    
     let isDefaultColor = true; // État du sprite, vrai si la couleur par défaut est affichée
     const defaultColor = sprite.color
     const highlightColor = new BABYLON.Color4(1, 1, 1, 1);
@@ -909,14 +639,11 @@ function blinkSprite(sprite) {
 	const mediumLowlightColor = new BABYLON.Color4((3*sprite.color.r+1)/4, (3*sprite.color.g+1)/4, (3*sprite.color.b+1)/4, (3*sprite.color.a+1)/4);
 	const mediumHighlightColor = new BABYLON.Color4((sprite.color.r+3)/4, (sprite.color.g+3)/4, (sprite.color.b+3)/4, (sprite.color.a+3)/4);
 
-    let localBlinkCount = 0;
-    const maxBlinks = 16; // Limit blink duration to prevent infinite blinking
-
     // Configure l'intervalle de clignotement
-    sprite.blinkInterval = setInterval(() => {
-		localBlinkCount++;
+    setInterval(() => {
+		blinkCount+=1
 		
-		var moduloBlink = localBlinkCount % 8;
+		var moduloBlink = blinkCount % 8;
 		
         if (moduloBlink == 0) {
             sprite.color = defaultColor;
@@ -934,68 +661,48 @@ function blinkSprite(sprite) {
             sprite.color = highlightColor;
             isDefaultColor = false;
         }
-        
-        // Stop blinking after maxBlinks and restore default color
-        if (localBlinkCount >= maxBlinks) {
-            sprite.color = defaultColor;
-            clearInterval(sprite.blinkInterval);
-            sprite.blinkInterval = null;
-        }
     }, 200); // Durée du clignotement en millisecondes
 }
 
 function moveCameraToSprite(spriteName) {
-	console.log('Moving camera to sprite:', spriteName);
-    
-    // Get all sprites from all managers
-    const sprites = getAllSprites();
+	console.log('move to',spriteName);
+    const sprites = scene.spriteManagers[0].sprites; // Assuming the first sprite manager
     let targetSprite = sprites.find(s => s.name === spriteName);
 
     if (targetSprite) {
-        console.log('Target sprite found:', targetSprite.name, 'at position:', targetSprite.position);
-        
         const targetPosition = new BABYLON.Vector3(targetSprite.position.x, targetSprite.position.y, targetSprite.position.z);
         const cameraStartPosition = camera.position.clone();
         const cameraStartTarget = camera.getTarget().clone();
 
-        const bufferDistance = 9; // Distance from sprite
+        const bufferDistance = 9; // Adjust the distance from sprite
         const directionVector = targetPosition.subtract(camera.position).normalize();
         const adjustedTargetPosition = targetPosition.subtract(directionVector.scale(bufferDistance));
 
-        const moveDistance = BABYLON.Vector3.Distance(cameraStartPosition, adjustedTargetPosition);
-        const numberOfFrames = Math.min(85, Math.max(10, Math.round(moveDistance)));
-        
-        console.log('Animation frames:', numberOfFrames, 'Distance:', moveDistance);
-        
-        // Stop any existing animations
-        scene.stopAnimation(camera);
-        
-        // Create animation for camera position
-        const animCamPosition = new BABYLON.Animation("animCamPosition", "position", 30, BABYLON.Animation.ANIMATIONTYPE_VECTOR3, BABYLON.Animation.ANIMATIONLOOPMODE_CONSTANT);
-        animCamPosition.setKeys([
-            {frame: 0, value: cameraStartPosition},
-            {frame: numberOfFrames, value: adjustedTargetPosition}
-        ]);
 
-        // Create animation for camera target
-        const animCamTarget = new BABYLON.Animation("animCamTarget", "target", 30, BABYLON.Animation.ANIMATIONTYPE_VECTOR3, BABYLON.Animation.ANIMATIONLOOPMODE_CONSTANT);
-        animCamTarget.setKeys([
-            {frame: 0, value: cameraStartTarget},
-            {frame: numberOfFrames, value: targetPosition}
-        ]);
+		const moveDistance = BABYLON.Vector3.Distance(cameraStartPosition, adjustedTargetPosition);
+		const numberOfFrames = Math.min(300,Math.max(60,Math.round(moveDistance * 4)));
+		
+		// Create animation for camera position (encore plus ralenti avec 15 fps)
+		      const animCamPosition = new BABYLON.Animation("animCamPosition", "position", 15, BABYLON.Animation.ANIMATIONTYPE_VECTOR3, BABYLON.Animation.ANIMATIONLOOPMODE_CONSTANT);
+		      animCamPosition.setKeys([{frame: 0, value: cameraStartPosition},{frame: numberOfFrames, value: adjustedTargetPosition}]);
 
-        // Start the animation
+		      // Create animation for camera target (encore plus ralenti avec 15 fps)
+		      const animCamTarget = new BABYLON.Animation("animCamTarget", "target", 15, BABYLON.Animation.ANIMATIONTYPE_VECTOR3, BABYLON.Animation.ANIMATIONLOOPMODE_CONSTANT);
+		      animCamTarget.setKeys([{frame: 0, value: cameraStartTarget},{  frame: numberOfFrames, value: targetPosition}]);
+
+        // Démarrer l'animation et attendre qu'elle se termine avant la pause
         const animationGroup = scene.beginDirectAnimation(camera, [animCamPosition, animCamTarget], 0, numberOfFrames, false);
         
-        // Add completion callback
-        animationGroup.onAnimationEndObservable.add(() => {
-            console.log('Camera animation completed');
+        blinkSprite(targetSprite);
+        
+        // Retourner la promesse d'animation pour pouvoir attendre sa fin
+        return new Promise((resolve) => {
+            animationGroup.onAnimationEndObservable.addOnce(() => {
+                resolve();
+            });
         });
 
-        // Make the sprite blink to indicate selection
-        blinkSprite(targetSprite);
-
-        // Find and update nearest particles list
+        // Find the nearest particles
         let distances = sprites.filter(s => s.isVisible).map(sprite => {
             return {
                 name: sprite.name,
@@ -1003,12 +710,11 @@ function moveCameraToSprite(spriteName) {
             };
         });
         distances.sort((a, b) => a.distance - b.distance);
-        
-        updateNearestList(distances, spriteName, targetSprite.metadata.subType);
-        
+		
+		updateNearestList(distances, spriteName, targetSprite.metadata.subType)
+		
     } else {
-        console.error("Sprite not found:", spriteName);
-        console.log("Available sprites:", sprites.map(s => s.name));
+        console.log("Sprite not found: " + spriteName);
     }
 }
 
@@ -1084,7 +790,7 @@ function createLegend(data) {
 
 // Function to filter sprites by type
 function filterByType(type) {
-    getAllSprites().forEach(sprite => {
+    scene.spriteManagers[0].sprites.forEach(sprite => {
 		if (sprite.metadata && sprite.metadata.subType === type) {
             sprite.isVisible = !sprite.isVisible;
         }
@@ -1110,7 +816,7 @@ function updateParticleList() {
     const dataList = document.getElementById('particlesList');
     dataList.innerHTML = ''; // Clear existing items
 
-    const particleNames = getAllSprites()
+    const particleNames = scene.spriteManagers[0].sprites
         .filter(sprite => sprite.isVisible)
         .map(sprite => sprite.name);
     
@@ -1133,106 +839,100 @@ function decryptData(encryptedData, password) {
     }
 }
 
-// Fonction pour charger la configuration des images personnalisées
-function loadImageConfiguration() {
-    try {
-        const saved = localStorage.getItem('imageConfiguration');
-        if (saved) {
-            return JSON.parse(saved);
+// Fonctions pour le mode démo
+function toggleDemoMode() {
+    if (demoModeActive) {
+        stopDemoMode();
+    } else {
+        startDemoMode();
+    }
+}
+
+function startDemoMode() {
+    if (!scene.spriteManagers[0] || !scene.spriteManagers[0].sprites.length) {
+        alert('Aucune étoile disponible pour le mode démo');
+        return;
+    }
+
+    demoModeActive = true;
+    const demoButton = document.getElementById('demoModeButton');
+    demoButton.textContent = 'Arrêter Démo';
+    demoButton.style.backgroundColor = '#dc3545'; // Rouge pour arrêter
+
+    createDemoGroups();
+    currentDemoGroupIndex = 0;
+    nextDemoGroup();
+}
+
+function stopDemoMode() {
+    demoModeActive = false;
+    const demoButton = document.getElementById('demoModeButton');
+    demoButton.textContent = 'Mode Démo';
+    demoButton.style.backgroundColor = '#28a745'; // Vert pour démarrer
+
+    if (demoInterval) {
+        clearTimeout(demoInterval);
+        demoInterval = null;
+    }
+    
+    currentDemoGroupIndex = 0;
+    console.log('Mode démo arrêté');
+}
+
+function createDemoGroups() {
+    // Créer des groupes d'étoiles basés sur les types (subType)
+    const sprites = scene.spriteManagers[0].sprites.filter(s => s.isVisible);
+    const groupsByType = {};
+    
+    sprites.forEach(sprite => {
+        const subType = sprite.metadata ? sprite.metadata.subType : 'DEFAULT';
+        if (!groupsByType[subType]) {
+            groupsByType[subType] = [];
         }
-    } catch (e) {
-        console.error('Erreur lors du chargement de la configuration des images:', e);
-    }
-    
-    // Configuration par défaut si aucune sauvegarde
-    return getDefaultImageConfiguration();
-}
-
-// Configuration par défaut des images
-function getDefaultImageConfiguration() {
-    return {
-        1: "1blackhole.png",
-        2: "2blackhole.png",
-        3: "3whitehole.png",
-        4: "4nebuleuse.png",
-        5: "5etoile.png",
-        6: "6etoile.png",
-        7: "7neutronstar.png",
-        8: "8planet.png",
-        9: "9planet.png",
-        10: "10protoplanet.png",
-        11: "11moon.png",
-        12: "12asteroid.png",
-        13: "13asteroid.png"
-    };
-}
-
-// Fonction pour obtenir l'image par défaut pour un niveau
-function getDefaultImageForLevel(level) {
-    const defaultConfig = getDefaultImageConfiguration();
-    return defaultConfig[level] || '5etoile.png';
-}
-
-// Fonction pour recharger les données avec la nouvelle configuration d'images
-async function reloadWithNewImageConfiguration() {
-    // Récupérer les données actuelles
-    const currentData = getAllSprites().map(sprite => ({
-        prefLabel: sprite.name,
-        subType: sprite.metadata.subType,
-        x: sprite.originalPosition.x / 20, // Diviser par le ratio utilisé
-        y: sprite.originalPosition.y / 20,
-        z: sprite.originalPosition.z / 20,
-        level: sprite.metadata.level
-    }));
-    
-    if (currentData.length > 0) {
-        // Nettoyer la scène actuelle
-        clearScene();
-        
-        // Recharger avec la nouvelle configuration
-        await main(currentData, 20);
-        
-        console.log('Données rechargées avec la nouvelle configuration d\'images');
-    }
-}
-
-// Fonction pour nettoyer la scène
-function clearScene() {
-    // Supprimer tous les sprites
-    if (scene.spriteManagers) {
-        scene.spriteManagers.forEach(manager => {
-            manager.dispose();
-        });
-    }
-    
-    // Vider les tableaux
-    labelSprites.length = 0;
-    originalPositions.length = 0;
-    
-    // Supprimer les meshes de texte
-    scene.meshes.filter(mesh => mesh.name.endsWith('_whoz_mesh')).forEach(mesh => {
-        if (mesh.material) {
-            if (mesh.material.emissiveTexture) {
-                mesh.material.emissiveTexture.dispose();
-            }
-            mesh.material.dispose();
-        }
-        scene.removeMesh(mesh);
-        mesh.dispose();
+        groupsByType[subType].push(sprite);
     });
+
+    // Convertir en tableau de groupes et prendre quelques étoiles représentatives de chaque type
+    demoGroups = [];
+    Object.keys(groupsByType).forEach(subType => {
+        const spritesOfType = groupsByType[subType];
+        // Prendre jusqu'à 3 étoiles par type pour éviter trop de longueur
+        const selectedSprites = spritesOfType.slice(0, Math.min(3, spritesOfType.length));
+        
+        selectedSprites.forEach(sprite => {
+            demoGroups.push({
+                sprite: sprite,
+                groupName: subType
+            });
+        });
+    });
+
+    console.log(`Mode démo créé avec ${demoGroups.length} étoiles dans ${Object.keys(groupsByType).length} groupes`);
 }
 
-// Écouter les changements de configuration depuis le sélecteur d'images
-window.addEventListener('storage', function(e) {
-    if (e.key === 'imageConfiguration' || e.key === 'imageConfigurationUpdate') {
-        console.log('Configuration d\'images mise à jour, rechargement...');
-        setTimeout(async () => {
-            await reloadWithNewImageConfiguration();
-        }, 100); // Petit délai pour s'assurer que la configuration est bien sauvegardée
+async function nextDemoGroup() {
+    if (!demoModeActive || currentDemoGroupIndex >= demoGroups.length) {
+        stopDemoMode();
+        return;
     }
-});
 
-// Exposer la fonction de rechargement pour le sélecteur d'images
-window.reloadWithNewImageConfiguration = reloadWithNewImageConfiguration;
+    const currentGroup = demoGroups[currentDemoGroupIndex];
+    const spriteName = currentGroup.sprite.name;
+    const groupName = currentGroup.groupName;
+    
+    console.log(`Mode démo: Navigation vers ${spriteName} (groupe: ${groupName}) - ${currentDemoGroupIndex + 1}/${demoGroups.length}`);
+    
+    // Déplacer la caméra vers l'étoile et attendre que l'animation soit terminée
+    await moveCameraToSprite(spriteName);
+    
+    currentDemoGroupIndex++;
+    
+    // Attendre la pause de 3 secondes APRÈS que l'animation soit terminée
+    demoInterval = setTimeout(() => {
+        if (demoModeActive) {
+            nextDemoGroup();
+        }
+    }, demoPauseDuration);
+}
 
 //scene.debugLayer.show()

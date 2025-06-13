@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html>
+    <head>
+
+        <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+
+        <title>Whoz leonardPSO - Test Demo</title>
+		<script src="https://cdn.babylonjs.com/babylon.js"></script>
+	    	<script src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js"></script>
+		<script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/3.1.9-1/crypto-js.js"></script>
+        <style>
+            html, body {
+                overflow: hidden;
+                width: 100%;
+                height: 100%;
+                margin: 0;
+                padding: 0;
+				font-family: 'system-ui', sans-serif; /* Apply Calibri font globally */
+            }
+
+            #renderCanvas {
+                width: 100%;
+                height: 100%;
+                touch-action: none;
+            }
+			
+			#searchContainer {
+                position: absolute;
+                top: 10px;
+                left: 10px;
+                background-color: rgba(255, 255, 255, 0.8);
+                padding: 10px;
+                border-radius: 5px;
+                box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+				display: block; /* Default to visible */
+            }
+            
+            #searchInput {
+                width: 200px;
+                padding: 5px;
+                border-radius: 3px;
+                border: 1px solid #ccc;
+            }
+            
+            #searchButton {
+                padding: 5px 10px;
+                border-radius: 3px;
+                border: none;
+                background-color: #007bff;
+                color: white;
+                cursor: pointer;
+                margin-left: 10px;
+            }
+
+            #searchButton:hover {
+                background-color: #0056b3;
+            }
+			
+			    /* Add styles for the legend */
+    #legend {
+        position: absolute;
+        top: 10px;
+        right: 10px;
+        background-color: rgba(255, 255, 255, 0.8);
+        padding: 10px;
+        border-radius: 5px;
+        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+		display: block; /* Default to visible */
+    }
+.legend-item {
+    display: flex;
+	font-size: 12px;
+    align-items: center;
+    margin-bottom: 5px;
+    cursor: pointer;
+}
+.legend-color {
+    width: 20px;
+    height: 20px;
+    margin-right: 10px;
+    border-radius: 50%;
+}
+	
+
+
+            .nearest-item {
+        margin-bottom: 5px;
+        font-size: 12px;
+        cursor: pointer;
+    }
+
+    .first-item {
+        font-weight: bold;
+        font-size: 14px; /* Légèrement plus grande */
+    }
+	
+	    #nearestContainer {
+        position: absolute;
+        bottom: 10px;
+        right: 10px;
+        background-color: rgba(255, 255, 255, 0.8);
+        padding: 10px;
+        border-radius: 5px;
+        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+        max-height: 40%;
+        overflow-y: auto;
+        display: block; /* Default to visible */
+    }
+
+    #nearestList {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+    }
+			
+			/* Style for toggle buttons */
+            .toggleButton {
+                position: absolute;
+                bottom: 90px;
+                left: 10px;
+				width: 70px;
+                background-color: #007bff;
+                color: white;
+                border: none;
+                border-radius: 5px;
+                padding: 10px 10px;
+                cursor: pointer;
+                margin-bottom: 5px;
+            }
+
+            .toggleButton:hover {
+                background-color: #0056b3;
+            }
+			
+		#loadButton {
+    position: absolute;
+    top: 10px;
+    left: 350px;
+    background-color: #28a745;
+    color: white;
+    border: none;
+    border-radius: 5px;
+    padding: 10px 20px;
+    cursor: pointer;
+    font-size: 14px;
+}
+
+#loadButton:hover {
+    background-color: #218838;
+}
+        </style>
+    </head>
+<body>
+    <script type="module" src="./index.js"></script>
+	<button id="loadButton">Load Test Data</button>
+	<div id="searchContainer">
+        <input type="text" id="searchInput" list="particlesList" placeholder="Enter particle name">
+        <datalist id="particlesList"></datalist>
+        <button id="searchButton">Search</button>
+    </div>
+	<canvas id="renderCanvas" touch-action="none"></canvas>
+	<div id="legend"></div>
+	<div id="nearestContainer">
+    <ul id="nearestList"></ul>
+    </div>
+	<button class="toggleButton" data-target="searchContainer">Search</button>
+    <button class="toggleButton" data-target="legend" style="bottom: 50px;">Legend</button>
+    <button class="toggleButton" data-target="nearestContainer" style="bottom: 10px;">Nearest</button>
+	    <script>
+		const toggleButtons = document.querySelectorAll('.toggleButton');
+        toggleButtons.forEach(button => {
+            button.addEventListener('click', () => {
+                const target = document.querySelector(`#${button.dataset.target}`);
+                if (target) {
+                    target.style.display = target.style.display === 'none' ? 'block' : 'none';
+                }
+            });
+        });
+
+        // Add event listener for the load test data button
+        document.getElementById('loadButton').addEventListener('click', async () => {
+            try {
+                const response = await fetch('./test_particles.json');
+                const data = await response.json();
+                main(data, 20);
+                document.getElementById('loadButton').style.display = 'none';
+            } catch (error) {
+                console.error("Failed to load test data:", error);
+                alert("Failed to load test data. Make sure test_particles.json exists.");
+            }
+        });
+    </script>
+</body>
+</html>
